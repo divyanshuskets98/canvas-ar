@@ -47,7 +47,7 @@
   <div id="settingsModal" class="modal" hidden>
     <div class="modal-card wide">
       <h3>Generative AI video (optional, free)</h3>
-      <p class="sub">Without this, every scan still gets an automatic animation package built here. To add true generative image-to-video, run <b>ComfyUI</b> on this PC with any image-to-video workflow (for example LTX-Video or Wan). Start it with <code>--enable-cors-header "*"</code>, export the workflow with <i>Save (API format)</i>, and put <code>"{{IMAGE}}"</code> in the LoadImage node and <code>{{PROMPT}}</code> in the prompt text. Set the output node to an MP4 video.</p>
+      <p class="sub">Free, runs on this PC (needs an NVIDIA GPU). 1) Install <b>ComfyUI Desktop</b>. 2) In ComfyUI open <i>Workflow → Browse Templates → Video</i>, pick an <b>image-to-video</b> template (e.g. LTX-Video) and let it download the models. 3) Run it once to check it works. 4) <i>Workflow → Export (API)</i> and paste the file's contents below. The scan image, the motion prompt and the size are filled in automatically. In ComfyUI's server settings, allow CORS origin <code>*</code> (or start it with <code>--enable-cors-header "*"</code>).</p>
       <label class="opt"><input type="checkbox" id="cfEnabled"> Use ComfyUI for each scan</label>
       <label class="opt">Server <input id="cfUrl" type="url" placeholder="http://127.0.0.1:8188"></label>
       <textarea id="cfWorkflow" rows="10" placeholder="Paste the API-format workflow JSON here"></textarea>
