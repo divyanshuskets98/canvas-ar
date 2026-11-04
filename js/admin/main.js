@@ -119,7 +119,7 @@ document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => (b.c
 $('#cfSave').onclick = () => {
   const wf = $('#cfWorkflow').value.trim();
   if (wf) { try { JSON.parse(wf.replace(/"\{\{(WIDTH|HEIGHT|SEED)\}\}"/g, '0')); } catch (e) { $('#cfMsg').textContent = 'Workflow is not valid JSON: ' + e.message; return; } }
-  if ($('#cfEnabled').checked && !wf.includes('{{IMAGE}}')) { $('#cfMsg').textContent = 'The workflow needs a "{{IMAGE}}" placeholder in its LoadImage node.'; return; }
+  if ($('#cfEnabled').checked && wf && !wf.includes('LoadImage')) { $('#cfMsg').textContent = 'This workflow has no LoadImage node – use an image-to-video workflow.'; return; }
   comfy = { enabled: $('#cfEnabled').checked, url: $('#cfUrl').value.trim() || 'http://127.0.0.1:8188', workflow: wf };
   saveComfySettings(comfy); $('#cfMsg').textContent = 'Saved.';
 };

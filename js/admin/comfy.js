@@ -22,7 +22,21 @@ function fill(workflowText, vars) {
     t = t.split(`"{{${k}}}"`).join(typeof v === 'number' ? String(v) : JSON.stringify(v)); // numeric placeholders
     t = t.split(`{{${k}}}`).join(String(v).replace(/["\\]/g, '\\$&'));                  // inside strings
   }
-  return JSON.parse(t);
+  const g = JSON.parse(t);
+  // No placeholders needed: wire the scan into an unmodified template automatically.
+  if (!workflowText.includes('{{IMAGE}}')) for (const n of Object.values(g)) if (n.class_type === 'LoadImage') n.inputs.image = vars.IMAGE;
+  if (!workflowText.includes('{{PROMPT}}')) {
+    // the positive prompt = the text-encode node feeding some node's "positive" input
+    const posIds = new Set(Object.values(g).map((n) => n.inputs?.positive).filter(Array.isArray).map((l) => String(l[0])));
+    for (const [id, n] of Object.entries(g)) if (n.class_type === 'CLIPTextEncode' && posIds.has(id)) n.inputs.text = vars.PROMPT;
+  }
+  // match the canvas aspect ratio on image-to-video nodes (e.g. LTXVImgToVideo, WanImageToVideo)
+  for (const n of Object.values(g)) {
+    if (/ImgToVideo|ImageToVideo/i.test(n.class_type || '') && typeof n.inputs?.width === 'number' && typeof n.inputs?.height === 'number' && !workflowText.includes('{{WIDTH}}')) {
+      n.inputs.width = vars.WIDTH; n.inputs.height = vars.HEIGHT;
+    }
+  }
+  return g;
 }
 
 // Returns { blob, type } of the generated clip.
@@ -43,7 +57,7 @@ export async function comfyGenerate({ url, workflow }, imageBlob, { prompt, widt
     if (!job) continue;
     if (job.status?.status_str === 'error') throw new Error('ComfyUI workflow failed');
     for (const out of Object.values(job.outputs || {})) {
-      const f = (out.gifs || out.videos || out.images || [])[0];
+      const f = [...(out.videos || []), ...(out.gifs || []), ...(out.images || [])].find((x) => /\.(mp4|webm|mov|gif|webp)$/i.test(x.filename)) || (out.gifs || out.videos || [])[0];
       if (!f) continue;
       const r = await fetch(`${base}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder || '')}&type=${encodeURIComponent(f.type || 'output')}`);
       const blob = await r.blob();
