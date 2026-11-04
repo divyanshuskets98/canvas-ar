@@ -6,6 +6,9 @@ import { Soundscape } from './sim/audio.js';
 import { PreviewSession } from './ar/preview.js';
 import { Interaction } from './ui/interaction.js';
 import { listCanvases, saveCanvas, deleteCanvas } from './storage.js';
+import { backendEnabled, submitScan, getScan, fetchJSON, publicUrl, sessionId } from './backend/client.js';
+import { deserializeScene } from './vision/serialize.js';
+import { CONFIG } from './config.js';
 
 const $ = (s) => document.querySelector(s);
 const DEMOS = [
@@ -16,7 +19,7 @@ const params = new URLSearchParams(location.search);
 
 const app = {
   library: [], session: null, experiences: new Map(), records: [], activeIdx: -1, audio: new Soundscape(),
-  interaction: null, settings: { masked: false, vision: false, stability: 'balanced', gain: 1 }, lastRecord: null,
+  interaction: null, settings: { masked: false, vision: false, stability: 'balanced', gain: 1 }, lastRecord: null, useAi: true,
 };
 window.canvasAR = app; // handy for debugging
 
@@ -150,7 +153,8 @@ function step(name, state) { const li = $(`#procSteps [data-step=${name}]`); li.
 async function processNew(canvas, meta) {
   show('process');
   $('#procActions').hidden = true; $('#procFound').innerHTML = ''; $('#procPct').textContent = '';
-  ['vision', 'ml', 'target', 'compose'].forEach((s) => step(s, ''));
+  ['vision', 'ml', 'target', 'compose', 'cloud'].forEach((s) => step(s, ''));
+  $('#procSteps [data-step=cloud]').textContent = 'Sending to the admin for AI animation';
   $('#procThumb').src = canvas.toDataURL('image/jpeg', 0.8);
   try {
     step('vision', 'run');
@@ -185,6 +189,19 @@ async function processNew(canvas, meta) {
     rec._img = canvas; rec._scene = scene;
     await saveCanvas(stripTransient(rec));
     step('compose', 'done');
+    if (backendEnabled()) {
+      step('cloud', 'run');
+      try {
+        await Promise.race([
+          submitScan({ id: rec.id, name: rec.name, imageBlob: rec.image, width: canvas.width, height: canvas.height,
+            summary: { themes: scene.topThemes, flames: scene.cues.flames, water: +scene.cues.waterArea.toFixed(3), sky: scene.cues.skyType, labels: scene.ml.labels.slice(0, 3).map((l) => l.name) } }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('upload timed out')), 20000)),
+        ]);
+        rec.ai = { status: 'pending', submitted: Date.now() };
+        await saveCanvas(stripTransient(rec));
+        step('cloud', 'done'); pollAi();
+      } catch (e) { console.warn('submit failed', e); step('cloud', 'skip'); $('#procSteps [data-step=cloud]').textContent = 'Sending to admin failed – on-device animation only'; }
+    } else { step('cloud', 'skip'); $('#procSteps [data-step=cloud]').textContent = 'AI animation service not configured (on-device animation only)'; }
     app.library = await listCanvases();
     app.lastRecord = rec;
     return rec;
@@ -227,15 +244,95 @@ function stopStage() {
   $('#settings').hidden = $('#addSheet').hidden = true;
 }
 
-async function buildExperience(rec, index) {
+const building = new Map();
+function buildExperience(rec, index) {
+  // one build per canvas at a time (tracking can fire "found" repeatedly)
+  if (!building.has(index)) building.set(index, buildExperienceNow(rec, index).finally(() => building.delete(index)));
+  return building.get(index);
+}
+async function buildExperienceNow(rec, index) {
   const img = await recordImage(rec);
-  const scene = sceneFor(rec, img);
-  const exp = new Experience({ image: img, scene, audio: app.audio, quality: app.quality ?? 1, toast });
+  let exp = null;
+  if (app.useAi && rec.ai?.status === 'done' && rec.ai.manifest) {
+    try { exp = await experienceFromManifest(rec, img); } catch (e) { console.warn('AI package unusable, using on-device animation', e); }
+  }
+  if (!exp) exp = new Experience({ image: img, scene: sceneFor(rec, img), audio: app.audio, quality: app.quality ?? 1, toast });
+  exp.rec = rec;
   exp.setMasked(app.settings.masked);
   exp.living.uniforms.uGain.value.setScalar(app.settings.gain);
   app.experiences.set(index, exp);
   if (app.settings.vision) toggleVision(exp, true);
   return exp;
+}
+
+// ------------------------------------------------------------------ AI results from the admin pipeline
+async function experienceFromManifest(rec, img) {
+  const m = rec.ai.manifest;
+  if (!rec._aiScene) {
+    const load = (p) => new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = () => rej(new Error('mask download failed')); i.src = publicUrl(p); });
+    const [a, b] = await Promise.all([load(m.masksA), load(m.masksB)]);
+    rec._aiScene = deserializeScene(m.scene, a, b);
+  }
+  const common = { scene: rec._aiScene, audio: app.audio, quality: app.quality ?? 1, toast, plan: m.plan };
+  if (m.mode === 'video' && m.video) {
+    const v = document.createElement('video');
+    Object.assign(v, { muted: true, loop: true, playsInline: true, crossOrigin: 'anonymous', src: publicUrl(m.video) });
+    v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+    await v.play().catch(() => {});
+    return new Experience({ ...common, image: img, video: v, plan: [] });
+  }
+  return new Experience({ ...common, image: img });
+}
+
+let aiTimer = null;
+function pollAi() {
+  if (!backendEnabled() || aiTimer) return;
+  const tick = async () => {
+    aiTimer = null;
+    const pending = app.library.filter((r) => r.ai && (r.ai.status === 'pending' || r.ai.status === 'processing'));
+    for (const rec of pending) {
+      try {
+        const row = await getScan(rec.id);
+        if (!row) continue;
+        if (row.status === 'done' && row.result_path) {
+          rec.ai = { status: 'done', manifest: await fetchJSON(row.result_path), at: Date.now() };
+          await saveCanvas(stripTransient(rec));
+          onAiReady(rec);
+        } else if (row.status !== rec.ai.status) {
+          rec.ai.status = row.status; rec.ai.error = row.error; await saveCanvas(stripTransient(rec)); updateAiChip();
+        }
+      } catch (e) { console.warn('AI poll', e.message); }
+    }
+    if (app.library.some((r) => r.ai && (r.ai.status === 'pending' || r.ai.status === 'processing'))) aiTimer = setTimeout(tick, CONFIG.pollMs);
+  };
+  aiTimer = setTimeout(tick, 500);
+}
+async function onAiReady(rec) {
+  // swap the running animation for the admin-generated one if this canvas is on screen
+  const i = app.records.findIndex((r) => r.id === rec.id);
+  if (i >= 0) { app.records[i].ai = rec.ai; app.records[i]._aiScene = null; }
+  if (i >= 0 && app.experiences.has(i) && app.useAi) await rebuildExperience(i);
+  toast(`AI animation ready for “${rec.name}”`, 3500);
+  updateAiChip();
+}
+async function rebuildExperience(i) {
+  const old = app.experiences.get(i); const parent = old?.root.parent;
+  old?.dispose(); parent?.remove(old.root); app.experiences.delete(i);
+  const exp = await buildExperience(app.records[i], i);
+  (parent || (app.mode === 'ar' ? app.session.stages[i].stage : app.session.stage)).add(exp.root);
+  if (app.mode === 'preview') exp.setOpacity(1);
+  if (i === app.activeIdx) renderChips(exp);
+}
+function aiLabel(rec) {
+  if (!rec?.ai) return null;
+  const st = rec.ai.status;
+  if (st === 'done') return app.useAi ? 'AI animation ✓' : 'AI animation (off)';
+  if (st === 'failed') return 'AI animation failed';
+  return st === 'processing' ? 'AI animating…' : 'AI queued…';
+}
+function updateAiChip() {
+  const exp = app.experiences.get(app.activeIdx);
+  if (exp) renderChips(exp);
 }
 
 function startLoop(onFrame) {
@@ -351,6 +448,15 @@ function renderChips(exp) {
     el.appendChild(c);
   }
   const add = document.createElement('button'); add.className = 'chip add'; add.textContent = '+ Add'; add.onclick = () => openAddSheet(exp); el.appendChild(add);
+  const rec = app.records[app.activeIdx], label = aiLabel(rec);
+  if (label) {
+    const ai = document.createElement('button'); ai.className = 'chip ai' + (rec.ai.status === 'done' && app.useAi ? ' on' : ''); ai.textContent = label;
+    ai.onclick = async () => {
+      if (rec.ai.status !== 'done') { toast(rec.ai.status === 'failed' ? 'The admin pipeline could not process this canvas' : 'The admin dashboard is preparing this animation'); return; }
+      app.useAi = !app.useAi; await rebuildExperience(app.activeIdx); toast(app.useAi ? 'Showing the AI animation' : 'Showing the on-device animation');
+    };
+    el.prepend(ai);
+  }
 }
 function selectChip(exp, b) {
   selectedChip = b.id;
@@ -404,6 +510,7 @@ function toggleVision(exp, on) {
 // ------------------------------------------------------------------ boot
 renderDemos();
 renderLibrary().then(async () => {
+  pollAi();
   // test hook: ?preview=diwali opens a demo canvas in preview mode directly
   const demo = params.get('preview');
   if (demo) {

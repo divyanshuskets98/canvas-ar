@@ -114,3 +114,5 @@ footer { margin-top: 28px; display: flex; gap: 12px; align-items: center; flex-w
 .modal[hidden] { display: none; }
 .modal-card { background: #1b1726; border: 1px solid var(--line); border-radius: 18px; padding: 20px; max-width: 480px; }
 .modal-card li { margin-bottom: 8px; color: var(--muted); } .modal-card li b { color: var(--text); }
+.chip.ai { border-color: rgba(143, 208, 255, 0.5); }
+.chip.ai.on { background: rgba(143, 208, 255, 0.92); color: #06213a; }

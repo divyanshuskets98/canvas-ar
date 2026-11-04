@@ -242,6 +242,7 @@ function findBlobs(c, regions, gridW, gridH) {
   }
   const lab = new Int32Array(n).fill(-1), stack = new Int32Array(n);
   const blobs = [];
+  let tinyStars = 0;
   for (let s = 0; s < n; s++) {
     if (!mask[s] || lab[s] >= 0) continue;
     let sp = 0; stack[sp++] = s; lab[s] = blobs.length;
@@ -257,7 +258,7 @@ function findBlobs(c, regions, gridW, gridH) {
       const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1];
       for (const j of nb) if (j >= 0 && mask[j] && lab[j] < 0) { lab[j] = blobs.length; stack[sp++] = j; }
     }
-    if (cnt < 2) { blobs.push(null); continue; }
+    if (cnt < 2) { if (peak > 0.6 && bgL / cnt < 0.3) tinyStars++; blobs.push(null); continue; }
     const bw = maxx - minx + 1, bh = maxy - miny + 1;
     let hue = Math.atan2(hy, hx) * 180 / Math.PI; if (hue < 0) hue += 360;
     blobs.push({
@@ -306,7 +307,9 @@ function findBlobs(c, regions, gridW, gridH) {
   // flames come in modest numbers; dozens of warm elongated blobs are more likely texture
   const nFl = list.filter((b) => b.kind === 'flame').length;
   if (nFl > 40) list.forEach((b) => { if (b.kind === 'flame') b.kind = 'light'; });
-  return list.sort((a, b) => b.area - a.area).slice(0, 400);
+  const res = list.sort((a, b) => b.area - a.area).slice(0, 400);
+  res.tinyStars = tinyStars;
+  return res;
 }
 
 export function hueToRgb(h, s, v) {
@@ -342,12 +345,13 @@ function streakCoherence(c) {
 }
 
 // ---------------------------------------------------------------- main
-export function analyzeImage(src) {
+// opts.grid / opts.blobRes: analysis resolutions (the admin pipeline uses higher values)
+export function analyzeImage(src, { grid: gridRes = 160, blobRes = 512 } = {}) {
   const t0 = performance.now();
-  const grid = toCanvas(src, 160);
+  const grid = toCanvas(src, gridRes);
   const c = channels(grid);
   const regions = segmentRegions(c);
-  const hi = channels(toCanvas(src, 512));
+  const hi = channels(toCanvas(src, blobRes));
   const blobs = findBlobs(hi, regions, c.w, c.h);
   const streak = streakCoherence(channels(toCanvas(src, 360)));
 
@@ -382,7 +386,7 @@ export function analyzeImage(src) {
     skyArea: regions.skyArea, waterArea: area(regions.water), vegArea: area(regions.veg),
     snowArea: area(regions.snow), autumnArea: area(regions.autumn),
     waterSpan: span / c.w, lightHueVariety: lightHues.size, glints: count('glint'),
-    flames: count('flame'), lights: count('light'), stars: count('star'), windows: count('window'),
+    flames: count('flame'), lights: count('light'), tinyStars: blobs.tinyStars || 0, stars: count('star'), windows: count('window'),
     sun: count('sun'), moon: count('moon'), glows: count('glow'),
     rectilinear: regions.rectilinear, vertical: regions.verticalRatio,
     streakDensity: streak.density, streakCoherence: streak.coherence,

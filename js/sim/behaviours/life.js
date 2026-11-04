@@ -14,13 +14,9 @@ function skyBand(scene) {
 
 // ------------------------------------------------------------------ birds
 export const Birds = {
-  id: 'birds', name: 'Flying birds', group: 'Life',
+  id: 'birds', name: 'Extra flock of birds', group: 'Add-ons',
   hint: 'Tap the sky to startle or summon a flock',
-  score: (s) => {
-    if (s.cues.skyArea < 0.12 || s.themes.night > 0.5 || s.themes.rain > 0.5) return 0;
-    const painted = (s.objects || []).some((o) => o.label === 'bird') ? 0.2 : 0;
-    return clamp(0.35 + Math.max(s.themes.ocean, s.themes.nature, s.themes.lake) * 0.4 + painted, 0, 0.95);
-  },
+  score: () => 0, // adds birds that aren't painted → opt-in only
   available: (s) => s.cues.skyArea > 0.05,
   create(ctx) {
     const { aspect, scene } = ctx;
@@ -95,9 +91,9 @@ export const Birds = {
 
 // ------------------------------------------------------------------ fireflies
 export const Fireflies = {
-  id: 'fireflies', name: 'Fireflies', group: 'Life',
+  id: 'fireflies', name: 'Fireflies', group: 'Add-ons',
   hint: 'Tap to call the fireflies to you',
-  score: (s) => (s.cues.vegArea > 0.04 && s.themes.night > 0.4 ? 0.75 : 0),
+  score: () => 0,
   available: () => true,
   create(ctx) {
     const { aspect, scene } = ctx;
@@ -149,7 +145,19 @@ export const Foliage = {
   hint: 'Tap trees to shake them · swipe for wind',
   score: (s) => (s.cues.vegArea > 0.03 || s.cues.autumnArea > 0.03 ? 0.85 : 0),
   available: (s) => s.cues.vegArea > 0.01 || s.cues.autumnArea > 0.01,
-  create(ctx) {
+  create(ctx) { return foliage(ctx, { sway: true, leaves: false }); },
+};
+
+export const FallingLeaves = {
+  id: 'leaves', name: 'Falling leaves', group: 'Add-ons',
+  hint: 'Tap trees to shake leaves loose',
+  score: () => 0,
+  available: () => true,
+  create(ctx) { return foliage(ctx, { sway: false, leaves: true }); },
+};
+
+function foliage(ctx, opts) {
+  {
     const { aspect, scene } = ctx;
     const autumn = scene.themes.autumn > 0.3;
     const N = autumn ? 60 : 28;
@@ -182,9 +190,8 @@ export const Foliage = {
     const L = ctx.living.uniforms;
     return {
       update(dt, t) {
-        L.uSway.value = 0.6 + inten * 0.9 + Math.min(1.5, ctx.wind.length() * 0.6);
-        shake = Math.max(0, shake - dt * 1.5); L.uShake.value = shake;
-        if (Math.random() < dt * (autumn ? 2 : 0.5) * inten * (1 + ctx.wind.length())) spawn();
+        if (opts.sway) { L.uSway.value = 0.6 + inten * 0.9 + Math.min(1.5, ctx.wind.length() * 0.6); shake = Math.max(0, shake - dt * 1.5); L.uShake.value = shake; }
+        if (opts.leaves && Math.random() < dt * (autumn ? 2 : 0.8) * inten * (1 + ctx.wind.length())) spawn();
         leaves.forEach((l, i) => {
           if (l.life > 0) {
             l.life -= dt; l.age += dt;
@@ -198,19 +205,20 @@ export const Foliage = {
         q.touch('aPos', 'aSize', 'aParam');
       },
       tapScore: (hit) => (hit.veg > 0.4 ? 0.5 : 0),
-      onTap(hit) { L.uShakeCenter.value.set(hit.nx, hit.ny); shake = 1; for (let k = 0; k < 8; k++) spawn({ nx: hit.nx, ny: hit.ny - 0.03 }); ctx.audio?.play('rustle'); },
+      onTap(hit) { if (opts.sway) { L.uShakeCenter.value.set(hit.nx, hit.ny); shake = 1; } if (opts.leaves) for (let k = 0; k < 8; k++) spawn({ nx: hit.nx, ny: hit.ny - 0.03 }); ctx.audio?.play('rustle'); },
       setIntensity(v) { inten = v; },
       setOpacity(o) { q.uniforms.uOpacity.value = o; },
-      dispose() { L.uSway.value = 0; L.uShake.value = 0; ctx.root.remove(q.mesh); q.dispose(); },
+      dispose() { if (opts.sway) { L.uSway.value = 0; L.uShake.value = 0; } ctx.root.remove(q.mesh); q.dispose(); },
     };
-  },
-};
+  }
+}
+
 
 // ------------------------------------------------------------------ dust motes / pollen (works on any canvas)
 export const Motes = {
-  id: 'motes', name: 'Floating motes', group: 'Ambient',
+  id: 'motes', name: 'Floating motes', group: 'Add-ons',
   hint: 'Move your phone – motes float in front of the canvas in 3D',
-  score: () => 0.3,
+  score: () => 0,
   available: () => true,
   create(ctx) {
     const { aspect } = ctx;

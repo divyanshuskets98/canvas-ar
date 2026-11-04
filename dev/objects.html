@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><body style="background:#222;color:#eee;font:12px monospace">
+<script type="module">
+// Debug: object extraction (birds / boats / clouds) on the demo canvases at several scan resolutions
+import { analyzeImage } from '../js/vision/analyzer.js';
+import { scoreThemes } from '../js/vision/classifier.js';
+import { extractObjects } from '../js/vision/objects.js';
+const q = new URLSearchParams(location.search);
+const names = (q.get('n') || 'ocean,forest,diwali,rain,citynight').split(','), widths = (q.get('w') || '432,800,1280').split(',').map(Number);
+window.results = {};
+for (const n of names) for (const W of widths) {
+  const img = new Image(); img.src = '../samples/' + n + '.jpg'; await img.decode();
+  const c = document.createElement('canvas'); c.width = W; c.height = Math.round(W * img.height / img.width); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const s = analyzeImage(c); s.themes = scoreThemes(s, null);
+  const o = extractObjects(c, s);
+  results[n + '@' + W + ':b'] = o.birds.map((b) => [b.nx, b.ny, b.nw, b.nh].map((v) => v.toFixed(3)).join(',')).join(' | ');
+  results[n + '@' + W] = `birds ${o.birds.length} clouds ${o.clouds.length} boats ${o.floaters.length} ${o.ms}ms sky:${s.cues.skyType}`;
+  const row = document.createElement('div'); row.textContent = n + '@' + W + ' ' + results[n + '@' + W];
+  const b = o.base; b.style.height = '120px'; row.append(b); document.body.append(row);
+}
+window.done = true;
+</script>

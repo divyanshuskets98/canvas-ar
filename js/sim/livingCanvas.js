@@ -9,7 +9,7 @@ import { GLSL_NOISE } from './common.js';
 const MAX_RIPPLES = 20;
 
 export class LivingCanvas {
-  constructor({ texture, scene, maxLights = 24 }) {
+  constructor({ texture, baseTexture, holeMask, scene, maxLights = 24 }) {
     this.scene = scene;
     const aspect = scene.aspect;
     const m = scene.maskData;
@@ -18,12 +18,20 @@ export class LivingCanvas {
     this.maskTex.needsUpdate = true;
 
     const hasWater = scene.cues.waterArea > 0.005;
+    // inpainted copy of the canvas + per-class hole masks (birds, floaters, clouds) so animated
+    // object sprites can leave their original spot without leaving a static copy behind
+    const hm = holeMask || { data: new Uint8Array([0, 0, 0, 255]), w: 1, h: 1 };
+    this.holeTex = new THREE.DataTexture(hm.data, hm.w, hm.h, THREE.RGBAFormat);
+    this.holeTex.magFilter = this.holeTex.minFilter = THREE.LinearFilter; this.holeTex.needsUpdate = true;
+    const img = texture.image;
     this.nLights = maxLights;
     this.ripples = Array.from({ length: MAX_RIPPLES }, () => new THREE.Vector4(0, 0, -99, 0));
     this.rippleIdx = 0;
 
     this.uniforms = {
-      uMap: { value: texture }, uMask: { value: this.maskTex }, uTime: { value: 0 }, uAspect: { value: aspect },
+      uMap: { value: texture }, uBase: { value: baseTexture || texture }, uHole: { value: this.holeTex }, uHoleOn: { value: new THREE.Vector3(0, 0, 0) },
+      uTexel: { value: new THREE.Vector2(1 / (img?.width || 1024), 1 / (img?.height || 1024)) },
+      uMask: { value: this.maskTex }, uTime: { value: 0 }, uAspect: { value: aspect },
       uWind: { value: new THREE.Vector2(0.3, 0) },
       uSkyBillow: { value: 0 }, uCloudAmt: { value: 0 }, uCloudCover: { value: 0.4 }, uCloudDark: { value: 0 },
       uWaveAmp: { value: 0 }, uHorizon: { value: scene.horizon || 0.4 }, uSparkle: { value: 0 },
@@ -54,13 +62,14 @@ export class LivingCanvas {
     this.rippleIdx = (this.rippleIdx + 1) % MAX_RIPPLES;
   }
 
-  dispose() { this.mesh.geometry.dispose(); this.material.dispose(); this.maskTex.dispose(); }
+  dispose() { this.mesh.geometry.dispose(); this.material.dispose(); this.maskTex.dispose(); this.holeTex.dispose(); }
 }
 
 const FRAG = /* glsl */`
 precision highp float;
 varying vec2 vUv;
-uniform sampler2D uMap, uMask;
+uniform sampler2D uMap, uBase, uHole, uMask;
+uniform vec3 uHoleOn; uniform vec2 uTexel;
 uniform float uTime, uAspect;
 uniform vec2 uWind;
 uniform float uSkyBillow, uCloudAmt, uCloudCover, uCloudDark;
@@ -76,7 +85,12 @@ uniform vec4 uSun;
 uniform float uFlash, uNight, uWet, uStars, uOpacity, uMasked;
 uniform vec3 uGain;
 ${GLSL_NOISE}
-vec3 tex(vec2 p){ return texture2D(uMap, vec2(p.x, 1.0 - p.y)).rgb; }
+vec3 tex(vec2 p){
+  vec2 t = vec2(p.x, 1.0 - p.y);
+  vec3 c = texture2D(uMap, t).rgb;
+  float h = dot(texture2D(uHole, p).rgb, uHoleOn);
+  return h > 0.001 ? mix(c, texture2D(uBase, t).rgb, clamp(h, 0.0, 1.0)) : c;
+}
 float luma(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
 
 void main(){
@@ -171,17 +185,19 @@ void main(){
     activity += cl;
   }
 
-  // --- twinkling stars in dark sky
+  // --- existing stars twinkle: points brighter than their surroundings in a dark sky
   if (uStars > 0.0 && m.r > 0.1) {
-    vec2 g = q * vec2(180.0, 180.0 * uAspect);
-    vec2 id = floor(g), f = fract(g) - 0.5;
-    float h = hash12(id);
-    if (h > 0.975) {
-      f -= (vec2(hash12(id + 3.1), hash12(id + 7.7)) - 0.5) * 0.6;
-      float tw = 0.45 + 0.55 * sin(uTime * (1.5 + h * 6.0) + h * 91.0);
-      float s = exp(-dot(f, f) * 55.0) * tw * (1.0 - smoothstep(0.15, 0.45, luma(col)));
-      col += vec3(1.0, 0.96, 0.9) * s * uStars * m.r;
-      activity += s;
+    float L0 = luma(col);
+    vec3 ring = tex(q + vec2(uTexel.x * 3.0, 0.0)) + tex(q - vec2(uTexel.x * 3.0, 0.0)) + tex(q + vec2(0.0, uTexel.y * 3.0)) + tex(q - vec2(0.0, uTexel.y * 3.0));
+    float Lm = luma(ring * 0.25);
+    float k = smoothstep(0.06, 0.25, L0 - Lm) * (1.0 - smoothstep(0.2, 0.45, Lm)) * m.r;
+    if (k > 0.0) {
+      vec2 cell = floor(q / (uTexel * 6.0));
+      float h = hash12(cell);
+      float tw = 0.5 + 0.5 * sin(uTime * (1.5 + h * 5.0) + h * 91.0);
+      vec3 bg = ring * 0.25;
+      col = mix(col, bg + (col - bg) * (0.25 + 1.1 * tw), k * uStars);
+      activity += k;
     }
   }
 

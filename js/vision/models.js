@@ -2,6 +2,7 @@
 // and COCO object detection. Everything degrades gracefully – if models can't be
 // fetched (offline, blocked) the pixel analyser alone drives the simulation.
 
+import { CONFIG } from '../config.js';
 const WASM_PATH = new URL('../../vendor/mediapipe/wasm', import.meta.url).href;
 const MODELS = {
   classifier: {
@@ -17,6 +18,7 @@ const MODELS = {
 let loading = null;
 
 async function pickModel(m) {
+  if (!CONFIG.localModels) return m.remote; // set localModels: true after running tools/fetch-models.*
   try {
     const r = await fetch(m.local, { method: 'HEAD' });
     if (r.ok && (r.headers.get('content-length') | 0) > 100000) return m.local;

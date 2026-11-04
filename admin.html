@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Canvas AR – Admin</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+</head>
+<body class="admin">
+  <section id="setup" class="panel" hidden>
+    <h1>Canvas AR admin</h1>
+    <p>The backend isn't configured yet. Add your Supabase project URL and anon key to <code>js/config.js</code>, run <code>supabase/setup.sql</code> once, then reload this page.</p>
+  </section>
+
+  <section id="login" class="panel" hidden>
+    <h1>Canvas AR admin</h1>
+    <p class="sub">Sign in with the admin user you created in Supabase → Authentication.</p>
+    <form id="loginForm">
+      <input id="email" type="email" placeholder="Email" autocomplete="username" required>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="btn primary" type="submit">Sign in</button>
+      <p id="loginErr" class="warn"></p>
+    </form>
+  </section>
+
+  <section id="dash" hidden>
+    <header class="bar">
+      <h1>Canvas AR · Scans</h1>
+      <span id="workerState" class="pill">Idle</span>
+      <label class="switch"><input type="checkbox" id="auto" checked> Auto-process</label>
+      <span class="spacer"></span>
+      <span id="who" class="sub"></span>
+      <button id="btnSettings" class="btn">AI video settings</button>
+      <button id="btnLogout" class="btn">Sign out</button>
+    </header>
+    <p id="tabWarn" class="warn" hidden>Keep this tab open and visible – it is the worker that processes scans. Background tabs are throttled by the browser.</p>
+    <div class="stats"><span id="stPending">0 waiting</span><span id="stProc">0 processing</span><span id="stDone">0 done</span><span id="stFail">0 failed</span><span id="stUsers">0 devices</span></div>
+    <div id="list" class="scan-list"></div>
+    <details class="log"><summary>Worker log</summary><pre id="log"></pre></details>
+  </section>
+
+  <div id="settingsModal" class="modal" hidden>
+    <div class="modal-card wide">
+      <h3>Generative AI video (optional, free)</h3>
+      <p class="sub">Without this, every scan still gets an automatic animation package built here. To add true generative image-to-video, run <b>ComfyUI</b> on this PC with any image-to-video workflow (for example LTX-Video or Wan). Start it with <code>--enable-cors-header "*"</code>, export the workflow with <i>Save (API format)</i>, and put <code>"{{IMAGE}}"</code> in the LoadImage node and <code>{{PROMPT}}</code> in the prompt text. Set the output node to an MP4 video.</p>
+      <label class="opt"><input type="checkbox" id="cfEnabled"> Use ComfyUI for each scan</label>
+      <label class="opt">Server <input id="cfUrl" type="url" placeholder="http://127.0.0.1:8188"></label>
+      <textarea id="cfWorkflow" rows="10" placeholder="Paste the API-format workflow JSON here"></textarea>
+      <div class="row"><button id="cfTest" class="btn">Test connection</button><button id="cfSave" class="btn primary">Save</button><button class="btn" data-close>Close</button></div>
+      <p id="cfMsg" class="sub"></p>
+    </div>
+  </div>
+
+  <script type="module" src="js/admin/main.js"></script>
+</body>
+</html>

@@ -6,34 +6,47 @@ import { Flames, FairyLights, Windows, Glow } from './behaviours/lights.js';
 import { Rain, Snow, Clouds, Stars, Nightfall } from './behaviours/weather.js';
 import { Birds, Fireflies, Foliage, Motes } from './behaviours/life.js';
 import { Water, Fireworks, Traffic } from './behaviours/scene.js';
+import { PaintedBirds, Floaters, CloudDrift } from './behaviours/objects.js';
+import { FallingLeaves } from './behaviours/life.js';
+import { extractObjects } from '../vision/objects.js';
 
 // Every behaviour scores itself against the scene graph; the composer turns on
 // the ones that fit (plus any the user adds). New behaviours only need to be
 // added to this list – nothing else is theme-specific.
-export const BEHAVIOURS = [Flames, FairyLights, Fireworks, Windows, Traffic, Glow, Water, Foliage, Clouds, Rain, Snow, Stars, Birds, Fireflies, Nightfall, Motes];
+//
+// "Preserve" principle: behaviours that animate what is already painted (flames,
+// bulbs, water, foliage, sky, painted birds/boats/clouds) switch on automatically.
+// Behaviours that ADD things that aren't in the picture (extra birds, fireworks,
+// fireflies, motes, traffic, falling leaves) score 0 and are only available via "+ Add".
+export const BEHAVIOURS = [Flames, FairyLights, Windows, Glow, Water, Floaters, PaintedBirds, CloudDrift, Foliage, Clouds, Rain, Snow, Stars,
+  Fireworks, Traffic, Birds, Fireflies, FallingLeaves, Nightfall, Motes];
 const AUTO_THRESHOLD = 0.45;
 
-export function planBehaviours(scene) {
-  const scored = BEHAVIOURS.map((b) => ({ b, score: clamp(b.score(scene) || 0, 0, 1), available: b.available(scene) }));
+export function planBehaviours(scene, objects) {
+  const scored = BEHAVIOURS.map((b) => ({ b, score: clamp(b.score(scene, objects) || 0, 0, 1), available: !!b.available(scene, objects) }));
   // rain and snow compete – keep the stronger one
   const rain = scored.find((s) => s.b === Rain), snow = scored.find((s) => s.b === Snow);
   if (rain.score >= AUTO_THRESHOLD && snow.score >= AUTO_THRESHOLD) (rain.score > snow.score ? snow : rain).score = 0.3;
-  const auto = scored.filter((s) => s.score >= AUTO_THRESHOLD && s.b !== Motes);
-  const motes = scored.find((s) => s.b === Motes);
-  if (auto.length < 2) motes.score = 0.6; // give sparse canvases some depth & life
   for (const s of scored) s.auto = s.score >= AUTO_THRESHOLD;
   return scored;
 }
 
 export class Experience {
-  constructor({ image, scene, audio, quality = 1, toast }) {
+  constructor({ image, scene, audio, quality = 1, toast, objects, plan, video }) {
     this.scene = scene;
     this.aspect = scene.aspect;
     if (!scene.maskData) scene.maskData = buildMaskData(scene);
     this.root = new THREE.Group();
-    this.texture = new THREE.CanvasTexture(image);
+    this.video = video || null;
+    this.texture = video ? new THREE.VideoTexture(video) : new THREE.CanvasTexture(image);
     this.texture.minFilter = THREE.LinearFilter; this.texture.generateMipmaps = false;
-    this.living = new LivingCanvas({ texture: this.texture, scene });
+    // cut out painted birds / boats / clouds so they can be animated where they are
+    // (not needed when an AI-generated video already animates the whole canvas)
+    try { this.objects = video ? { birds: [], floaters: [], clouds: [] } : objects || extractObjects(image, scene); }
+    catch (e) { console.warn('object extraction failed', e); this.objects = { birds: [], floaters: [], clouds: [] }; }
+    this.baseTexture = this.objects.base ? new THREE.CanvasTexture(this.objects.base) : null;
+    if (this.baseTexture) { this.baseTexture.minFilter = THREE.LinearFilter; this.baseTexture.generateMipmaps = false; }
+    this.living = new LivingCanvas({ texture: this.texture, baseTexture: this.baseTexture, holeMask: this.objects.holeMask, scene });
     this.root.add(this.living.mesh);
     this.sampler = makeSampler(image);
     this.wind = new THREE.Vector2(0.3, 0);
@@ -47,7 +60,7 @@ export class Experience {
     this.lightFree = Array.from({ length: this.living.nLights }, (_, i) => i);
     const self = this;
     this.ctx = {
-      root: this.root, scene, aspect: this.aspect, living: this.living, wind: this.wind, camLocal: this.camLocal, audio, quality, toast,
+      root: this.root, scene, aspect: this.aspect, living: this.living, wind: this.wind, camLocal: this.camLocal, objects: this.objects, audio, quality, toast,
       get time() { return self.time; }, get opacity() { return self.opacity; },
       mask: (name, nx, ny) => sampleMask(scene, name, nx, ny),
       sampleRing: (nx, ny, r) => this.sampler.ring(nx, ny, r),
@@ -55,8 +68,11 @@ export class Experience {
       freeLight: (i) => { if (i >= 0) { this.living.uniforms.uLights.value[i].set(0, 0, 0, 0); this.lightFree.push(i); } },
       setLight: (i, nx, ny, r, k, c) => { if (i < 0) return; this.living.uniforms.uLights.value[i].set(nx, ny, r, k); this.living.uniforms.uLightColors.value[i].set(c[0], c[1], c[2]); },
     };
-    this.plan = planBehaviours(scene);
-    for (const p of this.plan) if (p.auto) this.enable(p.b.id, true, clamp(0.55 + p.score * 0.45, 0, 1));
+    this.plan = planBehaviours(scene, this.objects);
+    if (plan) { // plan supplied by the admin pipeline: [{id, intensity}]
+      for (const p of this.plan) { const e = plan.find((x) => x.id === p.b.id); p.auto = !!e; }
+      for (const e of plan) if (this.plan.find((p) => p.b.id === e.id)?.available !== false) this.enable(e.id, true, e.intensity);
+    } else for (const p of this.plan) if (p.auto) this.enable(p.b.id, true, clamp(0.55 + p.score * 0.45, 0, 1));
   }
 
   enable(id, on, intensity) {
@@ -118,7 +134,8 @@ export class Experience {
 
   dispose() {
     for (const id of [...this.active.keys()]) this.enable(id, false);
-    this.living.dispose(); this.texture.dispose();
+    this.living.dispose(); this.texture.dispose(); this.baseTexture?.dispose();
+    if (this.video) { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); }
   }
 }
 

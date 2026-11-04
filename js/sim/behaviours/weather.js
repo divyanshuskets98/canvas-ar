@@ -148,7 +148,7 @@ export const Rain = {
 export const Snow = {
   id: 'snow', name: 'Snowfall', group: 'Weather',
   hint: 'Swipe to send a gust through the snow',
-  score: (s) => s.themes.snow,
+  score: (s) => (s.themes.snow >= 0.7 ? s.themes.snow : 0),
   available: () => true,
   create(ctx) {
     const { aspect } = ctx;
@@ -188,7 +188,7 @@ export const Snow = {
 
 // ------------------------------------------------------------------ clouds (drives living-canvas sky)
 export const Clouds = {
-  id: 'clouds', name: 'Drifting clouds', group: 'Weather',
+  id: 'clouds', name: 'Moving sky', group: 'Sky',
   hint: 'Swipe to change the wind and cloud direction',
   score: (s) => (s.cues.skyArea > 0.08 && s.cues.skyType !== 'night' ? (s.cues.skyType === 'overcast' ? 0.9 : 0.7) : s.cues.skyArea > 0.08 ? 0.35 : 0),
   available: (s) => s.cues.skyArea > 0.03,
@@ -199,7 +199,7 @@ export const Clouds = {
     return {
       update() {
         L.uSkyBillow.value = 1 * inten;
-        L.uCloudAmt.value = Math.max(L.uCloudAmt.value, (overcast ? 0.8 : 0.55) * inten);
+        L.uCloudAmt.value = Math.max(L.uCloudAmt.value, (overcast ? 0.75 : 0.12) * inten); // only light moving shade unless it's a storm sky
         L.uCloudCover.value = Math.max(L.uCloudCover.value, overcast ? 0.7 : 0.35);
         L.uCloudDark.value = Math.max(L.uCloudDark.value, overcast ? 0.45 : 0);
       },
@@ -215,7 +215,7 @@ export const Clouds = {
 export const Stars = {
   id: 'stars', name: 'Twinkling stars', group: 'Sky',
   hint: 'Tap the night sky for a shooting star',
-  score: (s) => (s.themes.night > 0.5 && s.cues.skyArea > 0.08 ? 0.85 : 0),
+  score: (s) => (s.themes.night > 0.5 && s.cues.skyArea > 0.08 && (s.cues.stars + (s.cues.tinyStars || 0)) >= 3 ? 0.85 : 0),
   available: (s) => s.cues.skyArea > 0.05,
   create(ctx) {
     const { aspect } = ctx;
@@ -240,7 +240,6 @@ export const Stars = {
     return {
       update(dt) {
         ctx.living.uniforms.uStars.value = inten;
-        if ((next -= dt) < 0) { shoot(); next = rand(6, 14); }
         shots.forEach((s, i) => {
           if (s.life > 0) {
             s.life -= dt; s.x += Math.cos(s.a) * s.v * dt; s.y += Math.sin(s.a) * s.v * dt;

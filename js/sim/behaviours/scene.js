@@ -13,8 +13,6 @@ export const Water = {
     const ocean = scene.themes.ocean > 0.45;
     const L = ctx.living.uniforms;
     // painted boats / floating things detected by the object detector
-    const boats = (scene.objects || []).filter((o) => ['boat', 'surfboard', 'bird'].includes(o.label) && ctx.mask('water', o.box.nx + o.box.nw / 2, o.box.ny + o.box.nh) > 0.3).slice(0, 4);
-    boats.forEach((o, i) => L.uBoats.value[i].set(o.box.nx, o.box.ny, o.box.nw, o.box.nh));
     // water sample points (for fish / idle drops)
     const pts = [];
     for (let k = 0; k < 4000 && pts.length < 200; k++) { const nx = Math.random(), ny = Math.random(); if (ctx.mask('water', nx, ny) > 0.7) pts.push({ nx, ny }); }
@@ -43,7 +41,6 @@ export const Water = {
       update(dt, t) {
         L.uWaveAmp.value = (ocean ? 1.0 : 0.35) * inten;
         L.uSparkle.value = (night ? 0.2 : dull ? 0.12 : ocean ? 0.85 : 0.5) * inten;
-        L.uBob.value = boats.length ? 1 : 0;
         if (pts.length && (scene.themes.nature > 0.3 || scene.themes.lake > 0.4) && !ocean && (nextFish -= dt) < 0) { jump(pick(pts)); nextFish = rand(7, 15); }
         if (pts.length && !ocean && (nextDrop -= dt) < 0) { const p = pick(pts); ctx.living.addRipple(p.nx, p.ny, 0.25, t); nextDrop = rand(1.5, 4); }
         drops.forEach((d, i) => {
@@ -64,9 +61,9 @@ export const Water = {
 
 // ------------------------------------------------------------------ fireworks
 export const Fireworks = {
-  id: 'fireworks', name: 'Fireworks', group: 'Festival',
+  id: 'fireworks', name: 'Fireworks', group: 'Add-ons',
   hint: 'Tap the sky to launch fireworks',
-  score: (s) => (s.cues.skyArea > 0.08 ? clamp(s.themes.festival * s.themes.night * 1.1, 0, 1) : 0),
+  score: () => 0, // adds objects that aren't painted → opt-in only
   available: (s) => s.cues.skyArea > 0.04,
   create(ctx) {
     const { aspect, scene } = ctx;
@@ -149,7 +146,7 @@ export const Fireworks = {
 
 // ------------------------------------------------------------------ traffic light-trails
 export const Traffic = {
-  id: 'traffic', name: 'Moving traffic', group: 'City',
+  id: 'traffic', name: 'Moving traffic', group: 'Add-ons',
   hint: 'Tap the road to speed traffic up or slow it down',
   road(s) {
     const cars = (s.objects || []).filter((o) => ['car', 'bus', 'truck', 'motorcycle'].includes(o.label));
@@ -157,7 +154,7 @@ export const Traffic = {
     if (s.themes.city > 0.4 && s.themes.night > 0.4) return 0.9;
     return null;
   },
-  score(s) { return this.road(s) != null && s.themes.city > 0.35 ? 0.7 : 0; },
+  score() { return 0; }, // adds light trails that aren't painted → opt-in only
   available(s) { return s.themes.city > 0.2; },
   create(ctx) {
     const { aspect } = ctx;
