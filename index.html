@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0b14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Canvas AR – Living Canvases</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+</head>
+<body>
+  <!-- HOME -->
+  <section id="home" class="screen active">
+    <header class="hero">
+      <div class="logo" aria-hidden="true"><span></span><span></span><span></span></div>
+      <h1>Canvas AR</h1>
+      <p>Point your camera at a canvas and watch it come alive – flames flicker, rain falls, water ripples, lights blink.</p>
+    </header>
+    <div class="actions">
+      <button id="btnStart" class="btn primary big">Start AR</button>
+      <div class="row">
+        <button id="btnScan" class="btn">Scan a new canvas</button>
+        <label class="btn" for="fileInput">Use the artwork file</label>
+        <input id="fileInput" type="file" accept="image/*" hidden>
+      </div>
+      <p class="tip">Best results: scan the canvas straight-on in even light, or upload the original artwork file of a print.</p>
+    </div>
+
+    <h2>Your canvases <small id="libCount"></small></h2>
+    <div id="library" class="cards"><p class="empty">No canvases yet. Scan one, upload an artwork, or try a demo below.</p></div>
+
+    <h2>Demo canvases</h2>
+    <p class="sub">Open one on another screen (or print it) and scan it – or preview it here without a camera.</p>
+    <div id="demos" class="cards"></div>
+    <footer>
+      <button id="btnAbout" class="link">How it works</button>
+      <span id="secureWarn" class="warn" hidden>Camera needs HTTPS (or localhost). Preview mode still works.</span>
+    </footer>
+  </section>
+
+  <!-- SCANNER -->
+  <section id="scan" class="screen">
+    <video id="scanVideo" playsinline muted autoplay></video>
+    <div class="guide-wrap"><div id="guide" class="guide"><i></i><i></i><i></i><i></i></div></div>
+    <div class="scan-top">
+      <button class="icon back" data-back aria-label="Back">&larr;</button>
+      <span class="pill">Fit the canvas inside the frame</span>
+    </div>
+    <div class="scan-bottom">
+      <div class="seg" id="aspectSeg">
+        <button data-aspect="1.5" class="on">Landscape</button><button data-aspect="1">Square</button><button data-aspect="0.75">Portrait</button>
+      </div>
+      <button id="btnCapture" class="shutter" aria-label="Capture canvas"></button>
+    </div>
+  </section>
+
+  <!-- PROCESSING -->
+  <section id="process" class="screen">
+    <div class="process-card">
+      <img id="procThumb" alt="">
+      <h3>Bringing your canvas to life</h3>
+      <ol id="procSteps">
+        <li data-step="vision">Understanding the scene</li>
+        <li data-step="ml">Recognising objects</li>
+        <li data-step="target">Learning the canvas for tracking <b id="procPct"></b></li>
+        <li data-step="compose">Composing simulations</li>
+      </ol>
+      <div id="procFound" class="found"></div>
+      <div class="row" id="procActions" hidden>
+        <button id="btnProcAR" class="btn primary">Start AR</button>
+        <button id="btnProcPreview" class="btn">Preview</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STAGE (AR or preview) -->
+  <section id="stage" class="screen">
+    <div id="arContainer"></div>
+    <div class="hud-top">
+      <button class="icon back" data-back aria-label="Back">&larr;</button>
+      <span id="status" class="pill">Starting…</span>
+      <div class="hud-right">
+        <button id="btnSound" class="icon" aria-label="Sound">&#9834;</button>
+        <button id="btnSettings" class="icon" aria-label="Settings">&#9881;</button>
+      </div>
+    </div>
+    <div id="reticle" class="reticle" hidden><div><i></i><i></i><i></i><i></i></div><p>Point at a registered canvas</p></div>
+    <div id="toast" class="toast"></div>
+    <div class="hud-bottom">
+      <div id="detected" class="detected"></div>
+      <div id="intensity" class="intensity" hidden><span id="intLabel"></span><input id="intRange" type="range" min="0.1" max="1" step="0.05"></div>
+      <div id="chips" class="chips"></div>
+    </div>
+    <div id="settings" class="sheet" hidden>
+      <h3>Settings</h3>
+      <label class="opt"><input type="checkbox" id="optMasked"> Effects only (let the real canvas show through)</label>
+      <label class="opt"><input type="checkbox" id="optVision"> Show what the AI sees (regions &amp; lights)</label>
+      <label class="opt">Tracking <select id="optStability"><option value="responsive">Responsive</option><option value="balanced" selected>Balanced</option><option value="steady">Steady (less jitter)</option></select></label>
+      <label class="opt">Brightness match <input type="range" id="optGain" min="0.6" max="1.4" step="0.02" value="1"></label>
+      <button class="btn" data-close>Done</button>
+    </div>
+    <div id="addSheet" class="sheet" hidden>
+      <h3>Add a simulation</h3>
+      <p class="sub">Auto-picked ones are already on. Mix in anything else.</p>
+      <div id="addList" class="add-list"></div>
+      <button class="btn" data-close>Done</button>
+    </div>
+  </section>
+
+  <div id="about" class="modal" hidden>
+    <div class="modal-card">
+      <h3>How it works</h3>
+      <ol>
+        <li><b>Learn</b> – the canvas image is turned into a tracking target in your browser (no upload).</li>
+        <li><b>Understand</b> – on-device vision finds sky, water, foliage, snow and light sources (flames, bulbs, windows, sun), and a small neural net names objects.</li>
+        <li><b>Compose</b> – every simulation scores itself against what was found; the best fits switch on and are placed exactly on the detected regions.</li>
+        <li><b>Anchor</b> – image tracking locks the simulation to the physical canvas, so it keeps position, scale and perspective as you move.</li>
+      </ol>
+      <p>Tap things to interact; swipe across the canvas to blow wind.</p>
+      <button class="btn" data-close>Got it</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

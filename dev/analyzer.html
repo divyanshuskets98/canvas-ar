@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><body style="background:#222;color:#eee;font:12px monospace">
+<script type="module">
+import { analyzeImage, maskPreviewCanvas } from '../js/vision/analyzer.js';
+import { scoreThemes } from '../js/vision/classifier.js';
+const names = ['diwali','rain','ocean','forest','citynight'];
+window.results = {};
+for (const n of names) {
+  const img = new Image(); img.src = '../samples/' + n + '.jpg'; await img.decode();
+  const s = analyzeImage(img); s.themes = scoreThemes(s, null);
+  const kinds = {}; s.blobs.forEach(b => kinds[b.kind] = (kinds[b.kind]||0)+1);
+  const row = document.createElement('div'); row.style.cssText='display:flex;gap:8px;margin:6px';
+  const a = new Image(); a.src = img.src; a.style.height='150px'; row.append(a);
+  const m = maskPreviewCanvas(s); m.style.height='150px'; row.append(m);
+  // blob overlay
+  const bc = document.createElement('canvas'); bc.width = img.width/4; bc.height = img.height/4; bc.style.height='150px';
+  const x = bc.getContext('2d'); x.drawImage(img,0,0,bc.width,bc.height); const col={glint:'#888','window?':'#f80',flame:'#f00',light:'#0f0',star:'#fff',window:'#ff0',sun:'#f0f',moon:'#0ff',glow:'#08f'};
+  s.blobs.forEach(b=>{ x.strokeStyle=col[b.kind]; x.strokeRect((b.nx-b.nw/2)*bc.width,(b.ny-b.nh/2)*bc.height,Math.max(2,b.nw*bc.width),Math.max(2,b.nh*bc.height)); });
+  row.append(bc);
+  const t = document.createElement('pre'); t.textContent = n + ' ' + s.ms + 'ms\n' + JSON.stringify(kinds) + '\n' +
+    Object.entries(s.themes).map(([k,v])=>k+':'+v.toFixed(2)).join(' ') + '\n' +
+    'sky:'+s.cues.skyType+' skyA:'+s.cues.skyArea.toFixed(2)+' water:'+s.cues.waterArea.toFixed(2)+' veg:'+s.cues.vegArea.toFixed(2)+' snow:'+s.cues.snowArea.toFixed(2)+' horizon:'+s.horizon.toFixed(2)+'\nrect:'+s.cues.rectilinear.toFixed(2)+' vert:'+s.cues.vertical.toFixed(2)+' streak:'+s.cues.streakDensity.toFixed(4)+'/'+s.cues.streakCoherence.toFixed(2)+' grey:'+s.stats.grey.toFixed(2);
+  row.append(t); document.body.append(row);
+  results[n] = t.textContent;
+}
+window.done = true;
+</script>

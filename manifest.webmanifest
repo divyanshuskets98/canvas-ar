@@ -1,0 +1,1 @@
+{ "name": "Canvas AR", "short_name": "Canvas AR", "start_url": "./index.html", "display": "standalone", "background_color": "#0d0b14", "theme_color": "#0d0b14", "description": "Point your camera at a canvas and watch it come alive." }
