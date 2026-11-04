@@ -2,7 +2,11 @@
 // Phones use the public anon key; the admin dashboard signs in with email/password.
 import { CONFIG } from '../config.js';
 
-const base = () => CONFIG.supabaseUrl.replace(/\/$/, '');
+// Only the project origin is used, so a pasted ".../rest/v1/" or trailing slash can't break the paths
+const base = () => { try { return new URL(CONFIG.supabaseUrl.trim()).origin; } catch (_) { return CONFIG.supabaseUrl.replace(/\/+$/, ''); } };
+// New-style keys (sb_publishable_…) are not JWTs and must not be sent as "Authorization: Bearer";
+// the gateway derives the anon role from the apikey header alone. Legacy anon JWT keys need both.
+const newStyleKey = () => CONFIG.supabaseAnonKey.startsWith('sb_');
 export const backendEnabled = () => !!(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
 export const publicUrl = (path) => `${base()}/storage/v1/object/public/${CONFIG.bucket}/${path.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -14,7 +18,11 @@ async function token() {
   if (adminSession.expires_at && Date.now() / 1000 > adminSession.expires_at - 60) await refresh();
   return adminSession.access_token;
 }
-function headers(tok, extra = {}) { return { apikey: CONFIG.supabaseAnonKey, Authorization: `Bearer ${tok}`, ...extra }; }
+function headers(tok, extra = {}) {
+  const h = { apikey: CONFIG.supabaseAnonKey, ...extra };
+  if (!(newStyleKey() && tok === CONFIG.supabaseAnonKey)) h.Authorization = `Bearer ${tok}`;
+  return h;
+}
 async function req(path, { method = 'GET', body, headers: h = {}, admin = false, raw = false } = {}) {
   const tok = admin ? await token() : CONFIG.supabaseAnonKey;
   const r = await fetch(base() + path, { method, body, headers: headers(tok, h) });

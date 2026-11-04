@@ -2,7 +2,7 @@
 // Supabase project (Project Settings → API). The anon key is designed to be public;
 // access is restricted by the row-level-security rules in supabase/setup.sql.
 export const CONFIG = {
-  supabaseUrl: 'https://ggkfaqhkryuvjzkjgnpv.supabase.co/rest/v1/',      // e.g. 'https://abcdefghijklmnop.supabase.co'
+  supabaseUrl: 'https://ggkfaqhkryuvjzkjgnpv.supabase.co',      // project URL only – no /rest/v1
   supabaseAnonKey: 'sb_publishable_e4pKthsZ1upKsExYinuKyg_lT96ci1T',  // the "anon public" key
   bucket: 'canvas-ar',
   pollMs: 3000,         // how often a phone checks for its AI result
