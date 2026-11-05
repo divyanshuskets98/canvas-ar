@@ -13,6 +13,7 @@ import { serializeScene } from '../vision/serialize.js';
 import { Experience } from '../sim/engine.js';
 import { uploadFile, publicUrl, updateScan } from '../backend/client.js';
 import { comfyGenerate } from './comfy.js';
+import { analyseMotion } from './motion.js';
 
 const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = () => rej(new Error('could not load scan image')); i.src = src; });
 function toCanvas(img, max = 1280) {
@@ -22,8 +23,9 @@ function toCanvas(img, max = 1280) {
 }
 
 // A text description of the motion that fits this canvas – used as the generative prompt
-export function motionPrompt(scene, objects, plan) {
+export function motionPrompt(scene, objects, plan, extra = '') {
   const on = new Set(plan.map((p) => p.id)), parts = [];
+  if ((scene.objects || []).some((o) => o.label === 'person')) parts.push('the person blinks their eyes slowly and breathes gently');
   if (objects.birds.length) parts.push(`the ${objects.birds.length > 1 ? objects.birds.length + ' birds' : 'bird'} flap their wings and glide gently in place`);
   if (on.has('flames')) parts.push('the lamp flames flicker softly');
   if (on.has('fairy')) parts.push('the string lights twinkle');
@@ -36,7 +38,7 @@ export function motionPrompt(scene, objects, plan) {
   if (on.has('windows')) parts.push('a few windows switch on and off');
   if (on.has('stars')) parts.push('stars twinkle');
   const motion = parts.length ? parts.join(', ') : 'subtle natural motion of the elements in the scene';
-  return `Animate this painting: ${motion}. Keep the exact composition, colours, objects and art style of the original image. Static camera, no zoom, no new objects, smooth seamless loop.`;
+  return `Animate this painting: ${motion}.${extra ? ' ' + extra.trim() : ''} Only these small parts move; everything else in the painting stays perfectly still. Keep the exact composition, colours, shapes and art style of the original image. Locked static camera, no zoom, no pan, no new objects, no hands, no people entering.`;
 }
 
 async function renderPreview(canvas, scene, objects, plan, seconds = 4) {
@@ -91,18 +93,36 @@ export async function processScan(scan, { worker, comfy, useML = true, onStatus 
   const probe = new Experience({ image: canvas, scene, objects });
   const plan = [...probe.active.keys()].map((id) => ({ id, intensity: +(probe.intensity.get(id) || 0.8).toFixed(2) }));
   probe.dispose();
-  const prompt = motionPrompt(scene, objects, plan);
+  const prompt = motionPrompt(scene, objects, plan, comfy?.extraPrompt);
 
-  let video = null, aiNote = null;
+  let video = null, aiNote = null, motionMask = null, movingFraction = null, aiPrompt = null;
   if (comfy?.enabled && comfy.workflow) {
     try {
       const png = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-      const w = Math.round(Math.min(768, canvas.width) / 32) * 32, h = Math.round(w * canvas.height / canvas.width / 32) * 32;
+      // keep the canvas's own shape (portrait stays portrait); both sides multiples of 32
+      const long = comfy.longSide || 832, landscape = canvas.width >= canvas.height;
+      const w = landscape ? long : Math.round(long * canvas.width / canvas.height / 32) * 32;
+      const h = landscape ? Math.round(long * canvas.height / canvas.width / 32) * 32 : long;
       const clip = await comfyGenerate(comfy, png, { prompt, width: w, height: h, onStatus });
+      if (clip.text) aiPrompt = clip.text;
       if (clip.type.startsWith('video/')) {
         const ext = clip.type.includes('webm') ? 'webm' : 'mp4';
         await uploadFile(`${dir}/animation.${ext}`, clip.blob, clip.type, { admin: true, upsert: true });
-        video = `${dir}/animation.${ext}`;
+        // keep only the parts that really move; reject clips that moved/redrew the whole picture
+        onStatus('Checking which parts of the AI video move…');
+        const mo = await analyseMotion(clip.blob, { source: canvas });
+        movingFraction = +mo.movingFraction.toFixed(3);
+        // Content-agnostic checks: the clip must start from the painting, and must not move/redraw most of its outlines
+        const allowed = comfy.maxEdgeMotion ?? 0.6;
+        const why = mo.firstDiff != null && mo.firstDiff > 0.12 ? `it doesn't start from the painting (difference ${Math.round(mo.firstDiff * 100)}%) – check the image strength is 1.0`
+          : mo.edgeMotion > allowed ? `it moves or redraws ${Math.round(mo.edgeMotion * 100)}% of the painting's outlines (camera moved or the model repainted it)`
+          : null;
+        if (why) {
+          aiNote = `AI video rejected: ${why}. Using the live animation instead.`;
+        } else {
+          await uploadFile(`${dir}/motion-mask.png`, mo.maskBlob, 'image/png', { admin: true, upsert: true });
+          video = `${dir}/animation.${ext}`; motionMask = `${dir}/motion-mask.png`;
+        }
       } else aiNote = 'ComfyUI returned ' + clip.type + ' – set the workflow output to an MP4/WebM video';
     } catch (e) { aiNote = 'AI video skipped: ' + e.message; }
   }
@@ -121,7 +141,7 @@ export async function processScan(scan, { worker, comfy, useML = true, onStatus 
   const manifest = {
     version: 1, scanId: scan.id, createdAt: new Date().toISOString(), worker, generator: 'canvas-ar-admin/2',
     scene: ser.json, masksA: `${dir}/masks-a.png`, masksB: `${dir}/masks-b.png`,
-    plan: video ? [] : plan, mode: video ? 'video' : 'live', video, preview, prompt, aiNote,
+    plan: video ? [] : plan, mode: video ? 'video' : 'live', video, motionMask, movingFraction, preview, prompt: aiPrompt || prompt, aiNote,
     summary: { themes: scene.topThemes, birds: objects.birds.length, boats: objects.floaters.length, clouds: objects.clouds.length, flames: scene.cues.flames, labels: ml.labels.slice(0, 3).map((l) => l.name) },
     ms: Math.round(performance.now() - t0),
   };

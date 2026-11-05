@@ -1,6 +1,6 @@
 import { backendEnabled, isSignedIn, signIn, signOut, adminEmail, listScans, claimScan, updateScan, deleteScan, publicUrl } from '../backend/client.js';
 import { processScan } from './pipeline.js';
-import { loadComfySettings, saveComfySettings, comfyPing } from './comfy.js';
+import { loadComfySettings, saveComfySettings, comfyPing, loadSavedWorkflow } from './comfy.js';
 
 const $ = (s) => document.querySelector(s);
 const show = (id) => ['setup', 'login', 'dash'].forEach((x) => ($('#' + x).hidden = x !== id));
@@ -84,7 +84,7 @@ async function showResult(card, s) {
       v.src = publicUrl(src); slot.replaceWith(v);
     } else slot.textContent = 'live package (no preview)';
     const meta = card.querySelector('.err');
-    meta.textContent = `${m.mode === 'video' ? 'AI video' : 'Live animation'} · ${m.plan.map((p) => p.id).join(', ') || '—'} · ${m.summary.birds} birds, ${m.summary.boats} boats, ${m.summary.clouds} clouds · ${Math.round(m.ms / 100) / 10}s` + (m.aiNote ? ' · ' + m.aiNote : '');
+    meta.textContent = `${m.mode === 'video' ? `AI video (moving parts: ${Math.round((m.movingFraction || 0) * 100)}%)` : 'Live animation'} · ${m.plan.map((p) => p.id).join(', ') || '—'} · ${m.summary.birds} birds, ${m.summary.boats} boats, ${m.summary.clouds} clouds · ${Math.round(m.ms / 100) / 10}s` + (m.aiNote ? ' · ' + m.aiNote : '');
   } catch (e) { /* manifest not yet visible */ }
 }
 
@@ -113,6 +113,7 @@ function setState(t, on) { const s = $('#workerState'); s.textContent = t; s.cla
 // ------------------------------------------------------------------ ComfyUI settings
 $('#btnSettings').onclick = () => {
   $('#cfEnabled').checked = comfy.enabled; $('#cfUrl').value = comfy.url; $('#cfWorkflow').value = comfy.workflow; $('#cfMsg').textContent = '';
+  $('#cfExtra').value = comfy.extraPrompt || ''; $('#cfLong').value = comfy.longSide || 832;
   $('#settingsModal').hidden = false;
 };
 document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => (b.closest('.modal').hidden = true)));
@@ -120,8 +121,13 @@ $('#cfSave').onclick = () => {
   const wf = $('#cfWorkflow').value.trim();
   if (wf) { try { JSON.parse(wf.replace(/"\{\{(WIDTH|HEIGHT|SEED)\}\}"/g, '0')); } catch (e) { $('#cfMsg').textContent = 'Workflow is not valid JSON: ' + e.message; return; } }
   if ($('#cfEnabled').checked && wf && !wf.includes('LoadImage')) { $('#cfMsg').textContent = 'This workflow has no LoadImage node – use an image-to-video workflow.'; return; }
-  comfy = { enabled: $('#cfEnabled').checked, url: $('#cfUrl').value.trim() || 'http://127.0.0.1:8188', workflow: wf };
+  comfy = { enabled: $('#cfEnabled').checked, url: $('#cfUrl').value.trim() || 'http://127.0.0.1:8188', workflow: wf, extraPrompt: $('#cfExtra').value.trim(), longSide: Math.round((+$('#cfLong').value || 832) / 32) * 32 };
   saveComfySettings(comfy); $('#cfMsg').textContent = 'Saved.';
+};
+$('#cfLoad').onclick = async () => {
+  $('#cfMsg').textContent = 'Loading…';
+  try { $('#cfWorkflow').value = await loadSavedWorkflow($('#cfUrl').value.trim() || 'http://127.0.0.1:8188'); $('#cfEnabled').checked = true; $('#cfMsg').textContent = 'Loaded the Canvas AR workflow – click Save.'; }
+  catch (e) { $('#cfMsg').textContent = 'Could not load it: ' + e.message; }
 };
 $('#cfTest').onclick = async () => {
   $('#cfMsg').textContent = 'Checking…';
