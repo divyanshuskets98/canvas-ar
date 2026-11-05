@@ -29,7 +29,7 @@ export class LivingCanvas {
     this.rippleIdx = 0;
 
     this.uniforms = {
-      uMap: { value: texture }, uBase: { value: baseTexture || texture }, uHole: { value: this.holeTex }, uHoleOn: { value: new THREE.Vector3(0, 0, 0) },
+      uMap: { value: texture }, uBase: { value: baseTexture || texture }, uHole: { value: this.holeTex }, uHoleOn: { value: new THREE.Vector3(0, 0, 0) }, uHoleGain: { value: 1 },
       uTexel: { value: new THREE.Vector2(1 / (img?.width || 1024), 1 / (img?.height || 1024)) },
       uMask: { value: this.maskTex }, uTime: { value: 0 }, uAspect: { value: aspect },
       uWind: { value: new THREE.Vector2(0.3, 0) },
@@ -69,7 +69,7 @@ const FRAG = /* glsl */`
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uMap, uBase, uHole, uMask;
-uniform vec3 uHoleOn; uniform vec2 uTexel;
+uniform vec3 uHoleOn; uniform vec2 uTexel; uniform float uHoleGain;
 uniform float uTime, uAspect;
 uniform vec2 uWind;
 uniform float uSkyBillow, uCloudAmt, uCloudCover, uCloudDark;
@@ -88,7 +88,7 @@ ${GLSL_NOISE}
 vec3 tex(vec2 p){
   vec2 t = vec2(p.x, 1.0 - p.y);
   vec3 c = texture2D(uMap, t).rgb;
-  float h = dot(texture2D(uHole, p).rgb, uHoleOn);
+  float h = dot(texture2D(uHole, p).rgb, uHoleOn) * uHoleGain;
   return h > 0.001 ? mix(c, texture2D(uBase, t).rgb, clamp(h, 0.0, 1.0)) : c;
 }
 float luma(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
@@ -170,6 +170,7 @@ void main(){
   }
 
   vec2 q = p + off;
+
   vec3 col = tex(q);
   vec3 base = col;
 

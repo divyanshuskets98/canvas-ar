@@ -32,21 +32,26 @@ export function planBehaviours(scene, objects) {
 }
 
 export class Experience {
-  constructor({ image, scene, audio, quality = 1, toast, objects, plan, video }) {
+  constructor({ image, scene, audio, quality = 1, toast, objects, plan, video, videoMask }) {
     this.scene = scene;
     this.aspect = scene.aspect;
     if (!scene.maskData) scene.maskData = buildMaskData(scene);
     this.root = new THREE.Group();
     this.video = video || null;
-    this.texture = video ? new THREE.VideoTexture(video) : new THREE.CanvasTexture(image);
+    // With a motion mask the original painting stays as the base and the AI video only shows
+    // through where it actually moves (eyes, flames, water…). Without one the video covers all.
+    if (video && !videoMask) videoMask = { data: new Uint8Array([255, 255, 255, 255]), w: 1, h: 1 }; // no mask → whole clip
+    const masked = !!video;
+    this.texture = video && !masked ? new THREE.VideoTexture(video) : new THREE.CanvasTexture(image);
     this.texture.minFilter = THREE.LinearFilter; this.texture.generateMipmaps = false;
     // cut out painted birds / boats / clouds so they can be animated where they are
     // (not needed when an AI-generated video already animates the whole canvas)
     try { this.objects = video ? { birds: [], floaters: [], clouds: [] } : objects || extractObjects(image, scene); }
     catch (e) { console.warn('object extraction failed', e); this.objects = { birds: [], floaters: [], clouds: [] }; }
-    this.baseTexture = this.objects.base ? new THREE.CanvasTexture(this.objects.base) : null;
+    this.baseTexture = masked ? new THREE.VideoTexture(video) : this.objects.base ? new THREE.CanvasTexture(this.objects.base) : null;
     if (this.baseTexture) { this.baseTexture.minFilter = THREE.LinearFilter; this.baseTexture.generateMipmaps = false; }
-    this.living = new LivingCanvas({ texture: this.texture, baseTexture: this.baseTexture, holeMask: this.objects.holeMask, scene });
+    this.living = new LivingCanvas({ texture: this.texture, baseTexture: this.baseTexture, holeMask: masked ? videoMask : this.objects.holeMask, scene });
+    if (masked) this.living.uniforms.uHoleOn.value.set(1, 0, 0);
     this.root.add(this.living.mesh);
     this.sampler = makeSampler(image);
     this.wind = new THREE.Vector2(0.3, 0);
@@ -94,6 +99,12 @@ export class Experience {
 
   update(dt, camera) {
     dt = Math.min(dt, 0.1);
+    // seamless loop: the clip starts on the painting itself, so fade the moving parts back
+    // into the still painting just before the clip ends and out of it just after it restarts
+    if (this.video) {
+      const d = this.video.duration, t = this.video.currentTime;
+      this.living.uniforms.uHoleGain.value = isFinite(d) && d > 1 ? Math.min(1, t / 0.35, Math.max(0, d - t) / 0.5) : 1;
+    }
     if (camera) { this.root.updateWorldMatrix(true, false); camera.getWorldPosition(this._v); this.camLocal.value.copy(this.root.worldToLocal(this._v)); }
     this.time += dt;
     const t = this.time, U = this.living.uniforms;
