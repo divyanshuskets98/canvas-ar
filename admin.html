@@ -47,10 +47,13 @@
   <div id="settingsModal" class="modal" hidden>
     <div class="modal-card wide">
       <h3>Generative AI video (optional, free)</h3>
-      <p class="sub">Free, runs on this PC (needs an NVIDIA GPU). 1) Install <b>ComfyUI Desktop</b>. 2) In ComfyUI open <i>Workflow → Browse Templates → Video</i>, pick an <b>image-to-video</b> template (e.g. LTX-Video) and let it download the models. 3) Run it once to check it works. 4) <i>Workflow → Export (API)</i> and paste the file's contents below. The scan image, the motion prompt and the size are filled in automatically. In ComfyUI's server settings, allow CORS origin <code>*</code> (or start it with <code>--enable-cors-header "*"</code>).</p>
+      <p class="sub">Free, runs on this PC. ComfyUI looks at each scanned canvas with a vision model (Qwen3-VL), writes what should move in <i>that</i> painting, and animates it with Wan 2.2 starting from the canvas itself. Only the parts that really move are shown on the phone; the rest stays the original painting. Start ComfyUI, then click <b>Load “Canvas AR” workflow</b> below and <b>Save</b>.</p>
       <label class="opt"><input type="checkbox" id="cfEnabled"> Use ComfyUI for each scan</label>
       <label class="opt">Server <input id="cfUrl" type="url" placeholder="http://127.0.0.1:8188"></label>
+      <label class="opt">Video size (long side, px) <input id="cfLong" type="number" min="384" max="1280" step="32" style="width:90px"></label>
+      <label class="opt">Optional standing instruction <input id="cfExtra" type="text" style="flex:1" placeholder="Leave empty – the vision model decides per canvas"></label>
       <textarea id="cfWorkflow" rows="10" placeholder="Paste the API-format workflow JSON here"></textarea>
+      <div class="row"><button id="cfLoad" class="btn">Load “Canvas AR” workflow from ComfyUI</button></div>
       <div class="row"><button id="cfTest" class="btn">Test connection</button><button id="cfSave" class="btn primary">Save</button><button class="btn" data-close>Close</button></div>
       <p id="cfMsg" class="sub"></p>
     </div>
