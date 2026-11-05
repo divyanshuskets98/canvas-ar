@@ -279,7 +279,14 @@ async function experienceFromManifest(rec, img) {
     Object.assign(v, { muted: true, loop: true, playsInline: true, crossOrigin: 'anonymous', src: publicUrl(m.video) });
     v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
     await v.play().catch(() => {});
-    return new Experience({ ...common, image: img, video: v, plan: [] });
+    let videoMask = null;
+    if (m.motionMask) {
+      const mi = await new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = () => rej(new Error('motion mask download failed')); i.src = publicUrl(m.motionMask); });
+      const c = document.createElement('canvas'); c.width = mi.width; c.height = mi.height;
+      const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(mi, 0, 0);
+      videoMask = { data: new Uint8Array(x.getImageData(0, 0, c.width, c.height).data.buffer), w: c.width, h: c.height };
+    }
+    return new Experience({ ...common, image: img, video: v, videoMask, plan: [] });
   }
   return new Experience({ ...common, image: img });
 }
